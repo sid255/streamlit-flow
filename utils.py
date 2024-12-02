@@ -1,10 +1,20 @@
+import os
+from dotenv import load_dotenv
 import requests
 from openai import OpenAI
+import streamlit as st
 
+load_dotenv("./streamlit_flow/frontend/.env.local")
+lb_api_url = os.getenv("LB_FETCH_API_URL")
+lb_id = os.getenv("LIVEBOARD_ID")
+bearer_token = os.getenv("BEARER_TOKEN")
+openai_api_key = os.getenv("OPEN_AI_API_KEY")
+answer_fetch_url = os.getenv("ANSWER_FETCH_API_URL")
 
-def get_image_summary(base64_image, filters, api_key):
+@st.cache_data(show_spinner=False)
+def get_image_summary(base64_image, filters):
     client = OpenAI(
-        api_key=api_key,
+        api_key=openai_api_key,
     )
 
     filters_prompt = ""
@@ -31,9 +41,9 @@ def get_image_summary(base64_image, filters, api_key):
             },
             {
             "type": "image_url",
-            "image_url": {
-                "url":  f"data:image/jpeg;base64,{base64_image}"
-            },
+                "image_url": {
+                    "url":  f"data:image/jpeg;base64,{base64_image}"
+                },
             },
         ],
         }
@@ -43,7 +53,9 @@ def get_image_summary(base64_image, filters, api_key):
     print(response.choices[0])
     return response.choices[0].message.content
 
-def get_path_summary(node_summary, filters, api_key):
+
+@st.cache_data(show_spinner=False)
+def get_path_summary(node_summary, filters):
     prompt = "We did an analysis on our data with multiple viz. "
     for i in range(len(node_summary)):
         prompt += f"Summary of first node: {node_summary[i]}."
@@ -60,7 +72,7 @@ def get_path_summary(node_summary, filters, api_key):
     print(prompt)
 
     client = OpenAI(
-        api_key=api_key,
+        api_key=openai_api_key,
     )
     response = client.chat.completions.create(
     model="gpt-4o-mini",
@@ -81,7 +93,12 @@ def get_path_summary(node_summary, filters, api_key):
     return response.choices[0].message.content
 
 
-def fetch_answer_png(node, bearer_token, answer_fetch_url):
+def fetch_answer_png(node):
+    runtime_filters = {}
+    for idx, col in enumerate(node.data['filters']):
+        runtime_filters[f'col{idx + 1}'] = col
+        runtime_filters[f'op{idx + 1}'] = "IN"
+        runtime_filters[f'val{idx + 1}'] = node.data['filters'][col]
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {bearer_token}',
@@ -89,7 +106,8 @@ def fetch_answer_png(node, bearer_token, answer_fetch_url):
     data = {
         "metadata_identifier": node.data['lbId'],
         "file_format": "PNG",
-        "visualization_identifiers": [node.data['vizId']]
+        "visualization_identifiers": [node.data['vizId']],
+        "runtime_filter": runtime_filters
     }
     response = requests.post(answer_fetch_url, headers=headers, json=data)
 
@@ -112,3 +130,20 @@ def merge_filters(parent_filters, child_filters):
             merged_filters[parent_key] = parent_values
     
     return merged_filters
+
+
+def get_lb_data():
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {bearer_token}",
+    }
+
+    req_data = {
+        "metadata_identifier": lb_id,
+        "data_format": "FULL",
+        "record_offset": 0,
+        "record_size": 100,
+    }
+
+    return requests.post(lb_api_url, headers=headers, json=req_data)
